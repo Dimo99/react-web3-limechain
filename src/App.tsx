@@ -1,19 +1,23 @@
-import * as React from 'react';
+import * as React from "react";
 import { useEffect, useState } from "react";
 
-import styled from 'styled-components';
+import styled from "styled-components";
 
-import Web3Modal from 'web3modal';
+import Web3Modal from "web3modal";
 // @ts-ignore
-import WalletConnectProvider from '@walletconnect/web3-provider';
-import Column from './components/Column';
-import Wrapper from './components/Wrapper';
-import Header from './components/Header';
-import Loader from './components/Loader';
-import ConnectButton from './components/ConnectButton';
+import WalletConnectProvider from "@walletconnect/web3-provider";
+import Column from "./components/Column";
+import Wrapper from "./components/Wrapper";
+import Header from "./components/Header";
+import Loader from "./components/Loader";
+import ConnectButton from "./components/ConnectButton";
 
-import { Web3Provider } from '@ethersproject/providers';
-import { getChainData } from './helpers/utilities';
+import { Web3Provider } from "@ethersproject/providers";
+import { getChainData } from "./helpers/utilities";
+import { US_ELECTION_ADDRESS } from "./constants/contracts";
+import { getContract } from "./helpers/ethers";
+import US_ELECTION from "./constants/abis/USElection.json";
+import ContractComponent from "./components/Contract";
 
 const SLayout = styled.div`
   position: relative;
@@ -52,7 +56,6 @@ const SBalances = styled(SLanding)`
 
 let web3Modal: Web3Modal;
 const App = () => {
-
   const [provider, setProvider] = useState<any>();
   const [fetching, setFetching] = useState<boolean>(false);
   const [address, setAddress] = useState<string>("");
@@ -66,19 +69,29 @@ const App = () => {
 
   useEffect(() => {
     createWeb3Modal();
-    
+
     if (web3Modal.cachedProvider) {
       onConnect();
     }
-
   }, []);
+
+  useEffect(() => {
+    if (libraryContract) {
+      libraryContract.on(
+        "LogStateResult",
+        (winner: any, stateSeats: any, state: any, tx: any) => {
+          console.log(winner, stateSeats, state, tx);
+        }
+      );
+    }
+  }, [libraryContract]);
 
   function createWeb3Modal() {
     web3Modal = new Web3Modal({
       network: getNetwork(),
       cacheProvider: true,
-      providerOptions: getProviderOptions()
-    })
+      providerOptions: getProviderOptions(),
+    });
   }
 
   const onConnect = async () => {
@@ -89,16 +102,27 @@ const App = () => {
 
     const network = await library.getNetwork();
 
-    const address = provider.selectedAddress ? provider.selectedAddress : provider?.accounts[0];
+    const address = provider.selectedAddress
+      ? provider.selectedAddress
+      : provider?.accounts[0];
     setLibrary(library);
     setChainId(network.chainId);
     setAddress(address);
     setConnected(true);
-    
+
     await subscribeToProviderEvents(provider);
+
+    const electionContract = getContract(
+      US_ELECTION_ADDRESS,
+      US_ELECTION.abi,
+      library,
+      address
+    );
+
+    setLibraryContract(electionContract);
   };
 
-  const subscribeToProviderEvents = async (provider:any) => {
+  const subscribeToProviderEvents = async (provider: any) => {
     if (!provider.on) {
       return;
     }
@@ -107,11 +131,12 @@ const App = () => {
     provider.on("networkChanged", networkChanged);
     provider.on("close", resetApp);
 
-    await web3Modal.off('accountsChanged');
+    await web3Modal.off("accountsChanged");
   };
 
-  const unSubscribe = async (provider:any) => {
+  const unSubscribe = async (provider: any) => {
     // Workaround for metamask widget > 9.0.3 (provider.off is undefined);
+    // @ts-ignore
     window.location.reload(false);
     if (!provider.off) {
       return;
@@ -120,16 +145,16 @@ const App = () => {
     provider.off("accountsChanged", changedAccount);
     provider.off("networkChanged", networkChanged);
     provider.off("close", resetApp);
-  }
+  };
 
   const changedAccount = async (accounts: string[]) => {
-    if(!accounts.length) {
-      // Metamask Lock fire an empty accounts array 
+    if (!accounts.length) {
+      // Metamask Lock fire an empty accounts array
       await resetApp();
     } else {
       setAddress(accounts[0]);
     }
-  }
+  };
 
   const networkChanged = async (networkId: number) => {
     const library = new Web3Provider(provider);
@@ -137,7 +162,7 @@ const App = () => {
     const chainId = network.chainId;
     setChainId(chainId);
     setLibrary(library);
-  }
+  };
 
   function getNetwork() {
     return getChainData(chainId).network;
@@ -148,20 +173,18 @@ const App = () => {
       walletconnect: {
         package: WalletConnectProvider,
         options: {
-          infuraId: process.env.REACT_APP_INFURA_ID
-        }
-      }
+          infuraId: process.env.REACT_APP_INFURA_ID,
+        },
+      },
     };
     return providerOptions;
-  };
+  }
 
   const resetApp = async () => {
-    
     await web3Modal.clearCachedProvider();
     localStorage.removeItem("WEB3_CONNECT_CACHED_PROVIDER");
     localStorage.removeItem("walletconnect");
     await unSubscribe(provider);
-
   };
 
   const resetState = () => {
@@ -174,7 +197,7 @@ const App = () => {
     setResult(null);
     setLibraryContract(null);
     setInfo(null);
-  }
+  };
 
   return (
     <SLayout>
@@ -185,6 +208,10 @@ const App = () => {
           chainId={chainId}
           killSession={resetApp}
         />
+        <ContractComponent
+          setIsFetching={setFetching}
+          electionContract={libraryContract}
+        />
         <SContent>
           {fetching ? (
             <Column center>
@@ -193,13 +220,13 @@ const App = () => {
               </SContainer>
             </Column>
           ) : (
-              <SLanding center>
-                {!connected && <ConnectButton onClick={onConnect} />}
-              </SLanding>
-            )}
+            <SLanding center>
+              {!connected && <ConnectButton onClick={onConnect} />}
+            </SLanding>
+          )}
         </SContent>
       </Column>
     </SLayout>
   );
-}
+};
 export default App;
